@@ -1,0 +1,1090 @@
+{
+  "name": "Product Knowledge Ops Copilot",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "knowledge-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "aec1fd82-3290-4d57-96a5-919744e388dc",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1472,
+        1312
+      ],
+      "webhookId": "tomtom-kops-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nreturn [{ json: {\n  query: b.query || '',\n  user_role: b.user_role || 'general',\n  session_id: b.session_id || new Date().toISOString(),\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "id": "ef09990f-36aa-4154-98da-d82cf67a7232",
+      "name": "Extract Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst body = {\n  model: 'gpt-4o-mini',\n  response_format: { type: 'json_object' },\n  temperature: 0.1,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a query understanding agent for TomTom internal knowledge system. Given a user query classify and rewrite for semantic search. Return ONLY valid JSON with exactly these keys: product_area (Maps|Routing|NavSDK|Traffic|AI_Agent|General), feature (string or null), audience (sales|developer|support|CS|general), intent (pre-sales|technical-debug|compliance-check|onboarding|general), rewritten_query (string optimised for vector search).'\n    },\n    {\n      role: 'user',\n      content: 'Role: ' + i.user_role + '\\nQuery: ' + i.query\n    }\n  ]\n};\nreturn [{ json: { ...i, _body: JSON.stringify(body) } }];"
+      },
+      "id": "96674d6d-4648-4e87-9a2c-79686b8b4749",
+      "name": "Build A1 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "3e7c710c-daae-487c-8be1-6e7ab288b522",
+      "name": "A1 Call OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -800,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nlet p;\ntry {\n  p = JSON.parse(i.choices[0].message.content);\n} catch(e) {\n  p = { product_area: 'General', feature: null, audience: 'general', intent: 'general', rewritten_query: i.query };\n}\nreturn [{ json: {\n  query: i.query,\n  user_role: i.user_role,\n  session_id: i.session_id,\n  timestamp: i.timestamp,\n  product_area: p.product_area || 'General',\n  feature: p.feature || null,\n  audience: p.audience || 'general',\n  intent: p.intent || 'general',\n  rewritten_query: p.rewritten_query || i.query\n}}];"
+      },
+      "id": "e345770e-91c6-428d-9bfa-12c55e2e86e3",
+      "name": "Parse A1 Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "284004a2-6d64-454a-8b9f-9de15fbf5674",
+      "name": "Get Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -144,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst vec = i.data[0].embedding;\nreturn [{ json: { ...i, _embedding: vec, _body: JSON.stringify({ vector: vec, topK: 5, includeMetadata: true, includeValues: false }) } }];"
+      },
+      "id": "1f802fb8-0965-43b5-b6cc-2d9209b9c72c",
+      "name": "Build Pinecone Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_PINECONE_INDEX_HOST/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "YOUR_PINECONE_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "9668f212-fd2d-454c-ace6-4885043b2db1",
+      "name": "A2 Pinecone Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        304,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst matches = i.matches || [];\nconst chunks = matches.map((m, idx) => ({\n  rank: idx + 1,\n  score: m.score,\n  title: m.metadata && m.metadata.title ? m.metadata.title : 'Unknown',\n  content: m.metadata && m.metadata.content ? m.metadata.content : (m.metadata && m.metadata.text ? m.metadata.text : ''),\n  product_area: m.metadata && m.metadata.product_area ? m.metadata.product_area : 'General',\n  status: m.metadata && m.metadata.status ? m.metadata.status : 'approved',\n  reliability: m.metadata && m.metadata.reliability_score ? m.metadata.reliability_score : 0.8\n}));\nconst chunks_formatted = chunks.map(c => '[' + c.rank + '] ' + c.title + ' (score:' + c.score.toFixed(2) + ', status:' + c.status + ')\\n' + c.content).join('\\n---\\n');\nreturn [{ json: {\n  ...i,\n  retrieved_chunks: chunks,\n  chunks_formatted: chunks_formatted,\n  chunks_count: chunks.length,\n  has_draft_sources: chunks.some(c => c.status === 'draft')\n}}];"
+      },
+      "id": "5b19f4fc-c2b0-45e0-b4c3-025c22a5a65b",
+      "name": "Parse Pinecone Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst body = {\n  model: 'gpt-4o-mini',\n  response_format: { type: 'json_object' },\n  temperature: 0.0,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a confidence evaluator for TomTom knowledge retrieval. Score 0.0-1.0 how well retrieved chunks answer the query. Return ONLY valid JSON: {\"confidence_score\":0.0,\"reasoning\":\"brief\",\"has_sufficient_answer\":false,\"source_quality\":\"high|medium|low\",\"gap_risk\":\"none|minor|major\"}. Scoring: 0.75-1.0=direct approved answer, 0.50-0.74=partial answer, 0.00-0.49=insufficient.'\n    },\n    {\n      role: 'user',\n      content: 'Query: ' + i.rewritten_query + '\\nChunks found: ' + i.chunks_count + '\\n\\n' + (i.chunks_formatted || 'No chunks retrieved')\n    }\n  ]\n};\nreturn [{ json: { ...i, _body: JSON.stringify(body) } }];"
+      },
+      "id": "5a9da0df-a825-4f2b-8b03-40308910e646",
+      "name": "Build A3 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "3b66a350-84ae-455d-aae1-22d7321391e1",
+      "name": "A3 Confidence Evaluator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        960,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nlet a3;\ntry {\n  a3 = JSON.parse(i.choices[0].message.content);\n} catch(e) {\n  a3 = { confidence_score: 0.3, reasoning: 'parse error', has_sufficient_answer: false, source_quality: 'low', gap_risk: 'major' };\n}\nconst label = a3.confidence_score >= 0.75 ? 'high' : a3.confidence_score >= 0.5 ? 'medium' : 'low';\nreturn [{ json: {\n  ...i,\n  confidence_score: a3.confidence_score,\n  confidence_label: label,\n  confidence_reasoning: a3.reasoning,\n  has_sufficient_answer: a3.has_sufficient_answer,\n  source_quality: a3.source_quality,\n  gap_risk: a3.gap_risk\n}}];"
+      },
+      "id": "0f514396-656c-4086-93d0-8d4777c296e0",
+      "name": "Parse A3 Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.confidence_score }}",
+              "operation": "largerEqual",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "id": "a9c97fd7-41e0-463f-9125-1412b980dfb2",
+      "name": "IF Confidence Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst body = {\n  model: 'gpt-4o-mini',\n  response_format: { type: 'json_object' },\n  temperature: 0.2,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are TomTom internal product knowledge assistant. Answer using ONLY provided context. Never invent facts. Adjust language for user role: sales=business language, developer=technical language. If any source has status draft add a warning. Return ONLY valid JSON: {\"answer\":\"full answer with source refs inline\",\"sources\":[{\"title\":\"string\",\"product_area\":\"string\",\"status\":\"string\"}],\"confidence_label\":\"high|medium\",\"has_draft_sources\":false,\"draft_warning\":null}'\n    },\n    {\n      role: 'user',\n      content: 'Role: ' + i.user_role + '\\nIntent: ' + i.intent + '\\nQuestion: ' + i.rewritten_query + '\\n\\nContext:\\n' + i.chunks_formatted\n    }\n  ]\n};\nreturn [{ json: { ...i, _body: JSON.stringify(body) } }];"
+      },
+      "id": "cdb9abe1-4a34-410a-b94e-7e143946701b",
+      "name": "Build A4 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "a9e30f1c-519d-4d96-a0f6-8704331f9eed",
+      "name": "A4 Generate Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1840,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nlet a4;\ntry {\n  a4 = JSON.parse(i.choices[0].message.content);\n} catch(e) {\n  a4 = { answer: 'Error generating answer.', sources: [], confidence_label: 'low', has_draft_sources: false, draft_warning: null };\n}\nreturn [{ json: {\n  ...i,\n  answer: a4.answer,\n  sources: a4.sources,\n  final_confidence_label: a4.confidence_label,\n  has_draft_sources: a4.has_draft_sources,\n  draft_warning: a4.draft_warning\n}}];"
+      },
+      "id": "244e161b-3e52-43d1-968c-3d3ae6341bb8",
+      "name": "Parse A4 Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nreturn [{ json: {\n  ...i,\n  answer: 'I do not have a high-confidence answer from approved sources. A knowledge gap ticket has been created and routed to the right team. Please contact your product or sales contact directly in the meantime.',\n  sources: [],\n  final_confidence_label: 'low',\n  has_draft_sources: false,\n  draft_warning: null\n}}];"
+      },
+      "id": "45a4b81e-66c0-4201-9a38-7abd0f8bac76",
+      "name": "Low Confidence Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch"
+      },
+      "id": "ab7246c3-3445-4077-93c0-67a29111d968",
+      "name": "Merge Final Answer",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nreturn [{ json: {\n  ...i,\n  _body: JSON.stringify({\n    session_id: i.session_id,\n    user_role: i.user_role,\n    original_query: i.query,\n    rewritten_query: i.rewritten_query,\n    product_area: i.product_area,\n    intent: i.intent,\n    confidence_score: i.confidence_score,\n    source_quality: i.source_quality,\n    was_gap_created: i.confidence_score < 0.75\n  })\n}}];"
+      },
+      "id": "277e979d-b8ed-46eb-a2c8-96b50dd53d7d",
+      "name": "Build A5 Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT.supabase.co/rest/v1/query_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "YOUR_SUPABASE_ANON_KEY"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SUPABASE_ANON_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "a89c6472-a22e-4d48-ba77-b88b8b3dc9af",
+      "name": "A5 Log to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1616,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nlet log_id = null;\ntry {\n  const r = Array.isArray(i) ? i[0] : i;\n  log_id = r.id || null;\n} catch(e) {}\nreturn [{ json: { ...i, query_log_id: log_id } }];"
+      },
+      "id": "c6b6ef11-2786-432e-81b3-4b7cbf0313f8",
+      "name": "Parse Log Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.confidence_score }}",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "id": "6303fcce-f333-47f2-a3c5-8b281c5d37d2",
+      "name": "IF Gap Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst body = {\n  model: 'gpt-4o-mini',\n  response_format: { type: 'json_object' },\n  temperature: 0.1,\n  messages: [\n    {\n      role: 'system',\n      content: 'Classify this TomTom knowledge gap and determine who should own it. Return ONLY valid JSON: {\"gap_type\":\"SALES|PRODUCT|ENGINEERING|CONTENT|LEGAL\",\"gap_topic\":\"concise topic max 10 words\",\"priority\":\"low|medium|high|critical\",\"description\":\"what content would resolve this gap in 1-2 sentences\",\"suggested_owner\":\"Sales Enablement|Product Marketing|Engineering|Knowledge Team|Legal\",\"routing_reason\":\"one sentence why this team owns it\"}. Rules: SALES=pricing/pitch/positioning/competitive. PRODUCT=feature existence/roadmap/capabilities. ENGINEERING=bug or doc-behavior mismatch. CONTENT=missing/stale/contradictory docs. LEGAL=privacy/GDPR/licensing/contracts. Priority: critical=live deal blocked, high=sales or CS affected, medium=internal process, low=nice to have.'\n    },\n    {\n      role: 'user',\n      content: 'Failed query: \"' + i.query + '\"\\nUser role: ' + i.user_role + '\\nIntent: ' + i.intent + '\\nProduct area: ' + i.product_area + '\\nConfidence score: ' + i.confidence_score\n    }\n  ]\n};\nreturn [{ json: { ...i, _body: JSON.stringify(body) } }];"
+      },
+      "id": "6e2527e4-8cf6-4424-a2f5-13457102fcd4",
+      "name": "Build A6 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._body }}",
+        "options": {}
+      },
+      "id": "7552cfef-4081-470e-9c10-6cb3ef50d88a",
+      "name": "A6 Classify Gap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2496,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nlet a6;\ntry {\n  a6 = JSON.parse(i.choices[0].message.content);\n} catch(e) {\n  a6 = { gap_type: 'CONTENT', gap_topic: 'Unclassified gap', priority: 'medium', description: 'Could not auto-classify', suggested_owner: 'Knowledge Team', routing_reason: 'Default routing to knowledge team' };\n}\nconst gap_body = JSON.stringify({\n  topic: a6.gap_topic,\n  gap_type: a6.gap_type,\n  priority: a6.priority,\n  description: a6.description,\n  suggested_owner: a6.suggested_owner,\n  source_query_id: i.query_log_id,\n  status: 'open',\n  occurrence_count: 1\n});\nreturn [{ json: {\n  ...i,\n  gap_type: a6.gap_type,\n  gap_topic: a6.gap_topic,\n  gap_priority: a6.priority,\n  gap_description: a6.description,\n  suggested_owner: a6.suggested_owner,\n  routing_reason: a6.routing_reason,\n  _gap_body: gap_body\n}}];"
+      },
+      "id": "856f49c6-3367-40c4-a9c6-a185a81825bc",
+      "name": "Parse A6 Build Gap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT.supabase.co/rest/v1/knowledge_gaps",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "YOUR_SUPABASE_ANON_KEY"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SUPABASE_ANON_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json._gap_body }}",
+        "options": {}
+      },
+      "id": "303bf54c-9487-4f4d-8391-21fcca8a6a49",
+      "name": "Create Gap in Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2944,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.gap_type }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "SALES"
+            },
+            {
+              "value2": "PRODUCT"
+            },
+            {
+              "value2": "ENGINEERING"
+            },
+            {
+              "value2": "LEGAL"
+            }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "id": "96072848-b010-4909-bcd3-5ce00197a04c",
+      "name": "A7 Issue Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SLACK_BOT_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ JSON.stringify({ channel: '#sales-enablement', text: '🔵 *Knowledge Gap — ' + $json.gap_priority.toUpperCase() + ' Priority*\\n*Topic:* ' + $json.gap_topic + '\\n*Asked by:* ' + $json.user_role + ' role\\n*Description:* ' + $json.gap_description + '\\n*Action:* Create or update the relevant sales material or battlecard.' }) }}",
+        "options": {}
+      },
+      "id": "67953ae0-fb90-43d3-a768-c907950208da",
+      "name": "Slack Sales Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3408,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SLACK_BOT_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ JSON.stringify({ channel: '#product-knowledge-gaps', text: '🟡 *Product Knowledge Gap — ' + $json.gap_priority.toUpperCase() + '*\\n*Topic:* ' + $json.gap_topic + '\\n*Query:* \"' + $json.query + '\"\\n*Description:* ' + $json.gap_description + '\\nIs this on roadmap? A brief note in the knowledge base resolves this.' }) }}",
+        "options": {}
+      },
+      "id": "783c68a2-5f00-438d-8af2-843a9711a8b8",
+      "name": "Slack Product Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3408,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SLACK_BOT_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ JSON.stringify({ channel: '#engineering-support', text: '⚙️ *Possible Doc-Behavior Mismatch*\\n*Topic:* ' + $json.gap_topic + '\\n*Query:* \"' + $json.query + '\"\\n*Description:* ' + $json.gap_description + '\\nIs this a documentation gap or an actual product bug?' }) }}",
+        "options": {}
+      },
+      "id": "cc32f9b2-6d4c-4670-b4e0-d9fd71b2fe3a",
+      "name": "Slack Engineering Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3408,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SLACK_BOT_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ JSON.stringify({ channel: '#legal-compliance', text: '⚖️ *Legal/Compliance Gap — ' + $json.gap_priority.toUpperCase() + '*\\n*Topic:* ' + $json.gap_topic + '\\n*Query:* \"' + $json.query + '\"\\n*Description:* ' + $json.gap_description + '\\nPlease review and provide an approved response.' }) }}",
+        "options": {}
+      },
+      "id": "593d84c7-d301-41d1-958f-d0770ca30eac",
+      "name": "Slack Legal Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3408,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SLACK_BOT_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ JSON.stringify({ channel: '#knowledge-ops', text: '📄 *Content Gap — ' + $json.gap_priority.toUpperCase() + '*\\n*Topic:* ' + $json.gap_topic + '\\n*Product area:* ' + $json.product_area + '\\n*Description:* ' + $json.gap_description + '\\nCreate or update the relevant document to close this gap.' }) }}",
+        "options": {}
+      },
+      "id": "851c010d-e911-4e95-b2b3-f9b31ad12c9a",
+      "name": "Slack Content Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3408,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nreturn [{ json: { ...i, _body: JSON.stringify({ model: 'text-embedding-3-small', input: i.rewritten_query }) } }];"
+      },
+      "id": "f015c211-b889-44f2-8a84-4198ea4fbf40",
+      "name": "Build Embedding Request1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ answer: $json.answer, confidence: $json.final_confidence_label, sources: $json.sources, has_draft_sources: $json.has_draft_sources, draft_warning: $json.draft_warning, product_area: $json.product_area, session_id: $json.session_id }) }}",
+        "options": {}
+      },
+      "id": "dbb39968-9b50-4e0d-bd13-488c879ff182",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2496,
+        1312
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Input": {
+      "main": [
+        [
+          {
+            "node": "Build A1 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build A1 Request": {
+      "main": [
+        [
+          {
+            "node": "A1 Call OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A1 Call OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Parse A1 Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse A1 Response": {
+      "main": [
+        [
+          {
+            "node": "Build Embedding Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Build Pinecone Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Pinecone Request": {
+      "main": [
+        [
+          {
+            "node": "A2 Pinecone Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A2 Pinecone Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Pinecone Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pinecone Results": {
+      "main": [
+        [
+          {
+            "node": "Build A3 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build A3 Request": {
+      "main": [
+        [
+          {
+            "node": "A3 Confidence Evaluator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3 Confidence Evaluator": {
+      "main": [
+        [
+          {
+            "node": "Parse A3 Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse A3 Response": {
+      "main": [
+        [
+          {
+            "node": "IF Confidence Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build A5 Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Confidence Check": {
+      "main": [
+        [
+          {
+            "node": "Build A4 Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Low Confidence Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build A4 Request": {
+      "main": [
+        [
+          {
+            "node": "A4 Generate Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A4 Generate Answer": {
+      "main": [
+        [
+          {
+            "node": "Parse A4 Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse A4 Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Final Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Low Confidence Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Final Answer",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Final Answer": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build A5 Log": {
+      "main": [
+        [
+          {
+            "node": "A5 Log to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A5 Log to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Parse Log Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Log Response": {
+      "main": [
+        [
+          {
+            "node": "IF Gap Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Gap Needed": {
+      "main": [
+        [
+          {
+            "node": "Build A6 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build A6 Request": {
+      "main": [
+        [
+          {
+            "node": "A6 Classify Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A6 Classify Gap": {
+      "main": [
+        [
+          {
+            "node": "Parse A6 Build Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse A6 Build Gap": {
+      "main": [
+        [
+          {
+            "node": "Create Gap in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gap in Supabase": {
+      "main": [
+        [
+          {
+            "node": "A7 Issue Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A7 Issue Router": {
+      "main": [
+        [
+          {
+            "node": "Slack Sales Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Product Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Engineering Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Legal Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Embedding Request1": {
+      "main": [
+        [
+          {
+            "node": "Get Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f5cad462-fe1d-455b-8d58-7fd27029c1fa",
+  "meta": {
+    "instanceId": "d8b8ca4a0eafd2f5ca22a1b5f6785a4b99ffc9c2a04f66f7c08ea6c2ada88804"
+  },
+  "id": "ZAw7hFqZcfU8UkQY",
+  "tags": []
+}
